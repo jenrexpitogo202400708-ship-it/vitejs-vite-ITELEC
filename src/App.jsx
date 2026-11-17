@@ -1,32 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import './App.css';
-
-const PRODUCTS = [
-  // Adidas
-  { id: 1, brand: 'Adidas', name: 'Ultraboost Light', category: 'Running', price: 8999, emoji: '👟', color: '#e0f0ff' },
-  { id: 2, brand: 'Adidas', name: 'Samba OG', category: 'Casual', price: 5999, emoji: '👟', color: '#f0e6d8' },
-  { id: 3, brand: 'Adidas', name: 'Adilette Slides', category: 'Sandals', price: 1799, emoji: '🩴', color: '#e0f7e9' },
-  // Nike
-  { id: 4, brand: 'Nike', name: 'Air Max 90', category: 'Casual', price: 7499, emoji: '👟', color: '#ffe0e0' },
-  { id: 5, brand: 'Nike', name: 'Pegasus 41', category: 'Running', price: 6999, emoji: '👟', color: '#fff4d6' },
-  { id: 6, brand: 'Nike', name: 'Victori One Slide', category: 'Sandals', price: 1699, emoji: '🩴', color: '#e8e0f5' },
-  // Anta
-  { id: 7, brand: 'Anta', name: 'KT9 Basketball', category: 'Basketball', price: 4999, emoji: '🏀', color: '#ffe0e0' },
-  { id: 8, brand: 'Anta', name: 'C37 Running', category: 'Running', price: 3299, emoji: '👟', color: '#e0eef5' },
-  { id: 9, brand: 'Anta', name: 'Casual Lite', category: 'Casual', price: 2499, emoji: '👟', color: '#e0f7e9' },
-  // New Balance
-  { id: 10, brand: 'New Balance', name: '574 Classic', category: 'Casual', price: 5499, emoji: '👟', color: '#f0e6d8' },
-  { id: 11, brand: 'New Balance', name: 'Fresh Foam 880', category: 'Running', price: 7299, emoji: '👟', color: '#e0f0ff' },
-  { id: 12, brand: 'New Balance', name: '550 Court', category: 'Casual', price: 6499, emoji: '👟', color: '#fff4d6' },
-  // Converse
-  { id: 13, brand: 'Converse', name: 'Chuck Taylor High', category: 'Casual', price: 3299, emoji: '👟', color: '#ffe0e0' },
-  { id: 14, brand: 'Converse', name: 'Chuck 70 Low', category: 'Casual', price: 4299, emoji: '👟', color: '#e8e0f5' },
-  { id: 15, brand: 'Converse', name: 'One Star Pro', category: 'Skate', price: 3999, emoji: '🛹', color: '#e0eef5' },
-  // Puma
-  { id: 16, brand: 'Puma', name: 'Suede Classic', category: 'Casual', price: 4199, emoji: '👟', color: '#e0f7e9' },
-  { id: 17, brand: 'Puma', name: 'Velocity Nitro', category: 'Running', price: 5999, emoji: '👟', color: '#ffe0e0' },
-  { id: 18, brand: 'Puma', name: 'Leadcat Slides', category: 'Sandals', price: 1299, emoji: '🩴', color: '#fff4d6' },
-];
 
 const BRANDS = ['All', 'Adidas', 'Nike', 'Anta', 'New Balance', 'Converse', 'Puma'];
 const CATEGORIES = ['All', 'Running', 'Casual', 'Basketball', 'Skate', 'Sandals'];
@@ -35,21 +8,39 @@ const peso = (n) => '₱' + n.toLocaleString();
 
 export default function App() {
   const [screen, setScreen] = useState('home'); // home | detail | cart | checkout | success
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [brand, setBrand] = useState('All');
   const [category, setCategory] = useState('All');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
   const [size, setSize] = useState(null);
   const [cart, setCart] = useState([]);
-  const [orderNo, setOrderNo] = useState('');
+  const [order, setOrder] = useState(null);
+  const [sending, setSending] = useState(false);
   const [form, setForm] = useState({ name: '', phone: '', address: '', payment: 'gcash', card: '', expiry: '', cvv: '' });
+
+  // Load products from the backend when the app opens
+  useEffect(() => {
+    fetch('/api/products')
+      .then((res) => res.json())
+      .then((data) => {
+        setProducts(data);
+        setLoading(false);
+      })
+      .catch(() => {
+        setError('Cannot reach the server. Make sure it is running.');
+        setLoading(false);
+      });
+  }, []);
 
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
   const subtotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const shipping = cart.length ? 100 : 0;
   const total = subtotal + shipping;
 
-  const visible = PRODUCTS.filter(
+  const visible = products.filter(
     (p) =>
       (brand === 'All' || p.brand === brand) &&
       (category === 'All' || p.category === category) &&
@@ -82,18 +73,46 @@ export default function App() {
     setForm({ ...form, [e.target.name]: e.target.value });
   }
 
-  // NOTE: This is a MOCK payment. A real app needs a backend + a payment gateway
-  // (e.g. PayMongo, Xendit, Stripe) so card details never touch your own frontend.
-  function placeOrder(e) {
+  // Send the order to the backend, then pay (mock payment)
+  async function placeOrder(e) {
     e.preventDefault();
     if (!form.name || !form.phone || !form.address) return alert('Please fill in your delivery details');
     if (form.payment === 'card' && (!form.card || !form.expiry || !form.cvv)) return alert('Please fill in your card details');
-    setOrderNo('SM-' + Math.floor(100000 + Math.random() * 900000));
-    setScreen('success');
+
+    setSending(true);
+    try {
+      // 1. create the order
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: cart.map((i) => ({ productId: i.id, size: i.size, qty: i.qty })),
+          delivery: { name: form.name, phone: form.phone, address: form.address },
+          paymentMethod: form.payment,
+        }),
+      });
+      const newOrder = await res.json();
+      if (!res.ok) throw new Error(newOrder.error);
+
+      // 2. pay for it (not needed for cash on delivery)
+      let finalOrder = newOrder;
+      if (form.payment !== 'cod') {
+        const payRes = await fetch('/api/orders/' + newOrder.id + '/pay', { method: 'POST' });
+        finalOrder = await payRes.json();
+        if (!payRes.ok) throw new Error(finalOrder.error);
+      }
+
+      setOrder(finalOrder);
+      setScreen('success');
+    } catch (err) {
+      alert('Order failed: ' + err.message);
+    }
+    setSending(false);
   }
 
   function newOrder() {
     setCart([]);
+    setOrder(null);
     setForm({ ...form, card: '', expiry: '', cvv: '' });
     setScreen('home');
   }
@@ -134,6 +153,10 @@ export default function App() {
                 </button>
               ))}
             </div>
+
+            {loading && <p className="muted">Loading shoes...</p>}
+            {error && <p className="muted">{error}</p>}
+
             <div className="grid">
               {visible.map((p) => (
                 <div key={p.id} className="card" onClick={() => openProduct(p)}>
@@ -144,7 +167,7 @@ export default function App() {
                   <div className="card-price">{peso(p.price)}</div>
                 </div>
               ))}
-              {visible.length === 0 && <p className="muted">No shoes found.</p>}
+              {!loading && !error && visible.length === 0 && <p className="muted">No shoes found.</p>}
             </div>
           </>
         )}
@@ -238,21 +261,23 @@ export default function App() {
             <div className="summary">
               <div className="total"><span>Total to pay</span><span>{peso(total)}</span></div>
             </div>
-            <button className="primary" type="submit">
-              {form.payment === 'cod' ? 'Place Order' : 'Pay ' + peso(total)}
+            <button className="primary" type="submit" disabled={sending}>
+              {sending ? 'Please wait...' : form.payment === 'cod' ? 'Place Order' : 'Pay ' + peso(total)}
             </button>
             <p className="muted small">Demo only: no real payment is processed.</p>
           </form>
         )}
 
         {/* ---------- Success ---------- */}
-        {screen === 'success' && (
+        {screen === 'success' && order && (
           <div className="success">
             <div className="big">✅</div>
             <h2>Order placed!</h2>
             <p>Order number</p>
-            <h3>{orderNo}</h3>
-            <p className="muted">Thank you, {form.name}. We'll deliver your shoes soon.</p>
+            <h3>{order.id}</h3>
+            <p className="muted">Payment: {order.paymentStatus}</p>
+            <p className="muted">Total: {peso(order.total)}</p>
+            <p className="muted">Thank you, {order.delivery.name}. We'll deliver your shoes soon.</p>
             <button className="primary" onClick={newOrder}>Continue Shopping</button>
           </div>
         )}
